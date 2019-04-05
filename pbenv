@@ -1,0 +1,6 @@
+export GOOGLE_CLOUD_PROJECT="saas-rally-dev"
+export TOPIC_NAME="walnut"
+SUBSCRIPTION_NAME="squirrel1"
+
+
+

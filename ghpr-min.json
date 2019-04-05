@@ -1,0 +1,8 @@
+{
+    "Url": "https://api.github.com/repos/octocat/Hello-World/pulls/1347",
+    "ExternalFormattedId": 1347,
+    "Name": "new-feature",
+    "Description": "Please pull these awesome changes for https://rally1.rallydev.com/#/detail/userstory/85293024712",
+    "ExternalID": "e5bd3914e2e596debea16f433f57875b5b90bcd6",
+    "Artifact"  : "https://rally1.rallydev.com/slm/webservice/v2.0/hierarchicalrequirement/85293024712"
+}

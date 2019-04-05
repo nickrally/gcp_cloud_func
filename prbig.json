@@ -1,0 +1,10 @@
+{
+    "Workspace" : "_ref",
+    "Project"   : "_ref",
+
+    "ExternalFormattedId": "3",   # Pull Request number in the Github repo
+    "ExternalID": "4f960864ad520522273c69d12eb86d446fc68e38",   # The SHA1 value for the commit that is associated with this PullRequest
+    "Name"      : "Bonne maman",  # The PullRequest title,   # Title
+    "Description" : "Please do the needful and stuff yourself with milquetoast nupoisms"  # Body
+    "Artifact"  : "_ref",
+}
