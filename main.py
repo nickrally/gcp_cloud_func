@@ -1,99 +1,120 @@
+########################################################################################################
+#
+#  main.py - for spike version of Google Cloud Function to take a data item
+#            representing a candidate Rally PullRequest off of a
+#            Google PubSub topic (via specific subscription) and use the Rally WSAPI
+#            to create said PullRequest in the Rally system.
+#            Requires an APIKey to be part of the incoming payload envelope,
+#            and requires a call to Rally WSAPI to confirm the presence of a mentioned
+#            Rally Artifact URL (FDP oriented URL) in the message.
+#            The confirmation is necessary to pull out the Workspace ref info which
+#            in turn is used to augment the candidate Rally PullRequest payload.
+#
+########################################################################################################
+
 import sys
 import time
-import requests
 import json
 import base64
 
-# def createPullRequest(payload, apikey):
-#     artifact_ref = payload['Artifact']
-#     rally = Rally("rally1.rallydev.com", apikey=apikey)
-#     artifact = rally.get('Artifact', query='ObjectID = %s' % artifact_ref.split('/')[-1], instance=True)
-#     workspace = artifact.Workspace.Name
-#     try:
-#         rally_pull_request = rally.create('PullRequest', payload, workspace=workspace, project=None)
-#         print("Created PullRequest with ObjectID: %s" % rally_pull_request.oid)
-#     except RallyRESTAPIError as ex:
-#         #raise Exception("Could not create PullRequest  %s" % ex.args[0])
-#         print("Attempt to create a Rally PullRequest resulted in a %s" % ex.args[0])
-#         return None, ex.args[0]
-#     except Exception as ex:
-#         return None, ex.args[0]
-#     return rally_pull_request, "Success"
+import requests
 
-# link = 'https://rally1.rallydev.com/#/detail/userstory/85293024712'
-# temp, short_ref = link.split('/#/detail', 1)
-# if 'userstory' in short_ref:
-#     short_ref = short_ref.replace('userstory', 'hierarchicalrequirement')
-# print(short_ref)
-# base_url = 'https://rally1.rallydev.com/slm/webservice/v2.0'
-# url      = '%s/%s' % (base_url, short_ref)
+########################################################################################################
 
-# headers = {'zsessionid':'_abc'}
-# r = requests.get(url, headers=headers)
-# print(r.status_code)
-# print(r.text)
-# print(type(r.text))
-# d = json.loads(r.text)
-# print(type(d))
-# print(d.keys())
+BASE_RALLY_URL  = 'https://rally1.rallydev.com/slm/webservice/v2.0'
+XMIT_ATTEMPT_BACKOFFS = [2.5, 7, 0]
 
-def post(self, payload):
-    try:
-        response = requests.post(self.base_url, headers=self.headers, data=json.dumps(payload))
-        response = response.json()
-    except requests.exceptions.RequestException as e:
-        print(e)
-        sys.exit(1)
-    return response
+########################################################################################################
 
-def createPullRequest(payload, apikey):
-    artifact_ref = payload['Artifact']
-    temp, short_ref = artifact_ref.split('/#/detail', 1)
-    if 'userstory' in short_ref:
-        short_ref = short_ref.replace('userstory', 'hierarchicalrequirement')
-    # print(short_ref)
-    base_url = 'https://rally1.rallydev.com/slm/webservice/v2.0'
-    url      = '%s/%s' % (base_url, short_ref)
-    headers = {'zsessionid':apikey} # nick@denver
-    response = requests.get(url, headers=headers)
-    d = json.loads(response.text)
-    workspace = d['HierarchichalRequirement']['Workspace']['_ref']
-
-def createRallyPullRequest(data, context):
+def parsePullRequest(data, context):
     """Background Cloud Function to be triggered by Pub/Sub.
     Args:
          data (dict): The dictionary with data specific to this type of event.
          context (google.cloud.functions.Context): The Cloud Functions event
          metadata.
     """
+    import base64
+
     if 'data' in data:
+        name = base64.b64decode(data['data']).decode('utf-8')
+    else:
+        name = 'World'
+    print('Hello {}!'.format(name))
+
+def createRallyPullRequest(data, context):
+    """
+        Background Cloud Function to be triggered by Pub/Sub.
+           Args:
+              data (dict): The dictionary with data specific to this type of event.
+              context (google.cloud.functions.Context): The Cloud Functions event metadata.
+    """
+    if 'data' not in data:
+       raise Exception("Unexpected data package, no 'data' key found in payload")
+
+    try:
         message = base64.b64decode(data['data']).decode('utf-8')
+    except Exception as exc:
+        sys.stderr.write("%s: Unable to decode via base64 this value: %s\n" % (exc[0], data['data']))
+        sys.exit(3)
+    try:
         message = json.loads(message)
-        apikey  = message["APIKey"]
-        payload = message["PullRequest"]
+    except Exception as exc:
+        sys.stderr.write("%s: Unable to JSON xlate to Python dict this string: %s\n" % (exc[0], message))
+        sys.exit(4)
 
-        for backoff in [2.5, 7, 0]:
-            rally_pull_request, reason = createPullRequest(payload, apikey)
-            if rally_pull_request:
-                break
-            elif 'concurrency' in reason.lower():
-                if backoff:
-                    print("will retry create PullRequest attempt in %s, %s" % (backoff, reason))
-                else:
-                    sys.stderr.write("unable to create PullRequest for %s after 3 attempts\n" % rally_pull_request['ExternalID'])
-                time.sleep(backoff)
+    apikey  = message["APIKey"]
+    payload = message["PullRequest"]
+
+    for backoff in XMIT_ATTEMPT_BACKOFFS:
+        workspace_ref = getArtifactWorkspaceRef(payload, apikey)
+        payload['Workspace'] = workspace_ref
+        rally_pull_request, reason = postPullRequest(payload, apikey)
+        if rally_pull_request:
+            break
+
+        if 'concurrency' in reason.lower():
+            if backoff:
+                print(f"will retry create PullRequest attempt in {backoff}, {reason}")
             else:
+                sys.stderr.write("unable to create PullRequest for %s after 3 attempts\n" % rally_pull_request['ExternalID'])
+            time.sleep(backoff)
+        else:
+            break
 
-                break
-        #print('DONE {}!'.format(rally_pull_request))
+###################################################################################################
 
-#
-# def main(args):
-#     global MESSAGE
-#     payload = base64.encodebytes(MESSAGE.encode())
-#     pub_sub_data = {'data' : payload}
-#     createRallyPullRequest(pub_sub_data, None)
-#
-#
-# if __name__ == "__main__":
-#     main(sys.argv[1:])
+def postPullRequest(payload, apikey):
+    headers = {'zsessionid' : apikey}
+    pr_create = "pullrequest/create"
+    pr_create_endpoint = f"{BASE_RALLY_URL}/{pr_create}"
+    try:
+        response = requests.post(pr_create_endpoint, headers=headers, data=json.dumps(payload))
+        if response.text.startswith('<html>') and response.text.endswith('</html>'):
+            print("response is HTML, not JSON data.  Here is the content")
+            print(response.text)
+            return False, "response is not JSON data"
+        response = response.json()
+    except requests.exceptions.RequestException as exc:
+        print(exc)
+        return False, "%s: %s" % (exc[0], exc[1])
+    return response, None
+
+
+def getArtifactWorkspaceRef(payload, apikey):
+    headers = {'zsessionid' : apikey}
+    artifact_ref = payload['Artifact']
+    #print("artifact_ref before split: %s" % artifact_ref)
+    temp, short_ref = artifact_ref.split('/#/detail/', 1)
+    if 'userstory' in short_ref:
+        short_ref = short_ref.replace('userstory', 'hierarchicalrequirement')
+    url = f'{BASE_RALLY_URL}/{short_ref}'
+    try:
+        response = requests.get(url, headers=headers)
+        #print("getArtifactWorkspaceRef response: %s" % response.text)
+        message_dict = json.loads(response.text)
+    except Exception as exc:
+        sys.stderr.write("%s: unable to query Rally for specific Artifact: %s\n" % (exc[0], short_ref))
+        sys.exit(2)
+    workspace = message_dict['HierarchicalRequirement']['Workspace']['_ref']
+    return workspace
+

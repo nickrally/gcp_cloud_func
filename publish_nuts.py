@@ -29,6 +29,9 @@ def read_json():
 
 def manufactureRallyPullRequest(index):
     raw = read_json()
+    fake_item = str(1500 + int(index))
+    raw['ExternalFormattedId'] = fake_item
+    raw['Url'] = raw['Url'].replace('1347', fake_item)
     return raw
 
 ##########################################################################################################
